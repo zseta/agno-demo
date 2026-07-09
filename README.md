@@ -1,6 +1,6 @@
 # agno + ScyllaDB vector store demo
 
-Demonstrates every Cassandra/ScyllaDB integration API interface available in [agno](https://docs.agno.com):
+Demonstrates how you can use ScyllaDB with [agno](https://docs.agno.com):
 
 | Interface | Description |
 |---|---|
