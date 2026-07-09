@@ -1,0 +1,38 @@
+networks:
+  scylla-net:
+    driver: bridge
+
+services:
+  scylla:
+    image: scylladb/scylla:2026.2
+    container_name: scylla
+    networks:
+      scylla-net:
+        aliases: [scylla]
+    ports:
+      - "9042:9042"
+    command: >
+      --smp 1
+      --memory 1G
+      --overprovisioned 1
+      --vector-store-primary-uri http://vector-store:6080
+      --broadcast-rpc-address 127.0.0.1
+    healthcheck:
+      test: ["CMD-SHELL", "nodetool status 2>/dev/null | grep -q UN"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 90s
+
+  vector-store:
+    image: scylladb/vector-store:1.8.0
+    container_name: vector-store
+    networks:
+      scylla-net:
+        aliases: [vector-store]
+    environment:
+      VECTOR_STORE_URI: "0.0.0.0:6080"
+      VECTOR_STORE_SCYLLADB_URI: "scylla:9042"
+    depends_on:
+      scylla:
+        condition: service_healthy
