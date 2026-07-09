@@ -5,7 +5,7 @@ networks:
 services:
   scylla:
     image: scylladb/scylla:2026.2
-    container_name: scylla
+    container_name: agno-scylla
     networks:
       scylla-net:
         aliases: [scylla]
@@ -17,6 +17,7 @@ services:
       --overprovisioned 1
       --vector-store-primary-uri http://vector-store:6080
       --broadcast-rpc-address 127.0.0.1
+      --enable-cassio-compatibility 1
     healthcheck:
       test: ["CMD-SHELL", "nodetool status 2>/dev/null | grep -q UN"]
       interval: 10s
@@ -26,7 +27,7 @@ services:
 
   vector-store:
     image: scylladb/vector-store:1.8.0
-    container_name: vector-store
+    container_name: agno-vector-store
     networks:
       scylla-net:
         aliases: [vector-store]
