@@ -59,7 +59,7 @@ console = Console()
 SCYLLA_HOST = os.getenv("SCYLLA_HOST", "127.0.0.1")
 SCYLLA_PORT = int(os.getenv("SCYLLA_PORT", "9042"))
 KEYSPACE = "agno_keyspace"
-TABLE_NAME = "knowledge"
+TABLE_NAME = "knowledge_st"  # sentence-transformer table (384 dims)
 RECIPES_URL = "https://agno-public.s3.amazonaws.com/recipes/ThaiRecipes.pdf"
 AGNO_DOCS_URL = "https://docs.agno.com/basics/agents/overview.md"
 
@@ -100,15 +100,30 @@ def _get_session():
 
 
 def _build_vector_db(session):
-    from agno.knowledge.embedder.openai import OpenAIEmbedder
+    from agno.knowledge.embedder.sentence_transformer import SentenceTransformerEmbedder
     from agno.vectordb.cassandra import Cassandra
+    from agno.vectordb.cassandra.index import AgnoMetadataVectorCassandraTable
+
+    embedder = SentenceTransformerEmbedder()  # all-MiniLM-L6-v2, 384 dims, runs locally
+
+    # agno's Cassandra class hardcodes vector_dimension=1024; patch it to match
+    # the actual embedder output so the table is created with the right size.
+    class CassandraWithDims(Cassandra):
+        def initialize_table(self):
+            self.table = AgnoMetadataVectorCassandraTable(
+                session=self.session,
+                keyspace=self.keyspace,
+                vector_dimension=self.embedder.dimensions,
+                table=self.table_name,
+                primary_key_type="TEXT",
+            )
 
     # ── Interface 1: Cassandra() ──────────────────────────────────────────────
-    return Cassandra(
+    return CassandraWithDims(
         table_name=TABLE_NAME,
         keyspace=KEYSPACE,
         session=session,
-        embedder=OpenAIEmbedder(dimensions=1024),
+        embedder=embedder,
     )
 
 
@@ -121,8 +136,9 @@ def _build_knowledge(vector_db):
 
 def _build_agent(knowledge):
     from agno.agent import Agent
+    from agno.models.groq import Groq
 
-    return Agent(knowledge=knowledge)
+    return Agent(model=Groq(), knowledge=knowledge)
 
 
 # ── CLI commands ───────────────────────────────────────────────────────────────

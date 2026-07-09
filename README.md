@@ -17,7 +17,7 @@ Demonstrates every Cassandra/ScyllaDB integration API interface available in [ag
 
 - Docker and Docker Compose
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
-- An OpenAI API key
+- A [Groq](https://console.groq.com/) API key (free tier available)
 
 ## Setup
 
@@ -25,9 +25,9 @@ Demonstrates every Cassandra/ScyllaDB integration API interface available in [ag
 # 1. Install dependencies
 uv sync
 
-# 2. Set your OpenAI API key
+# 2. Set your Groq API key
 cp .env.example .env
-# edit .env and fill in OPENAI_API_KEY
+# edit .env and fill in GROQ_API_KEY
 
 # 3. Start ScyllaDB + vector store
 docker compose up -d
