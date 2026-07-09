@@ -1,17 +1,23 @@
 -- =============================================================================
--- ScyllaDB schema for the agno + ScyllaDB vector store demo
--- Generated from a live cluster (ScyllaDB 2026.2 + vector-store 1.8.0)
--- via: DESCRIBE KEYSPACE agno_keyspace;
+-- Schema for the agno + ScyllaDB vector store demo
+--
+-- DDL shown below is what cassio (the library agno uses internally) sends to
+-- the database. Inline comments mark where ScyllaDB stores a different form.
 -- =============================================================================
 
 
 -- ---------------------------------------------------------------------------
 -- 1. Keyspace
---    NetworkTopologyStrategy with tablets enabled (ScyllaDB recommended)
---    Requires --enable-cassio-compatibility 1 on the ScyllaDB node so that
---    cassio's ENTRIES map index is rewritten as a regular secondary index.
+--    cassio does not create the keyspace; demo.py creates it explicitly.
+--    SimpleStrategy is the cassio default; here we use NetworkTopologyStrategy
+--    with tablets (ScyllaDB recommended).
 -- ---------------------------------------------------------------------------
 
+-- What cassio / the docs suggest:
+-- CREATE KEYSPACE IF NOT EXISTS agno_keyspace
+--     WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1};
+
+-- What this demo creates (ScyllaDB-optimised):
 CREATE KEYSPACE IF NOT EXISTS agno_keyspace
     WITH replication = {'class': 'NetworkTopologyStrategy', 'datacenter1': '1'}
     AND tablets = {'enabled': true};
@@ -19,54 +25,69 @@ CREATE KEYSPACE IF NOT EXISTS agno_keyspace
 
 -- ---------------------------------------------------------------------------
 -- 2. Vector table
---    Created automatically by cassio (via agno.vectordb.cassandra.Cassandra)
---    when the first Cassandra() object is instantiated.
+--    Sent by cassio verbatim; ScyllaDB stores it unchanged.
 --
 --    Columns
 --    -------
---    row_id         TEXT  – UUID string; primary key / document chunk id
---    attributes_blob TEXT  – JSON bag of extra cassio-managed attributes
---    body_blob       TEXT  – plain-text content of the document chunk
---    document_name   TEXT  – the name= value passed to knowledge.insert()
---    metadata_s      MAP<TEXT,TEXT> – arbitrary key/value metadata dict
---                             (e.g. {"doc_type": "recipe_book", ...})
---    vector          VECTOR<FLOAT, 384> – embedding produced by
---                             SentenceTransformerEmbedder (all-MiniLM-L6-v2)
+--    row_id          TEXT            UUID string; primary key / chunk id
+--    attributes_blob TEXT            JSON bag of extra cassio attributes
+--    body_blob       TEXT            plain-text content of the chunk
+--    document_name   TEXT            name= value passed to knowledge.insert()
+--    metadata_s      MAP<TEXT,TEXT>  arbitrary key/value metadata
+--    vector          VECTOR<FLOAT,N> embedding vector
 --
---    NOTE: agno's Cassandra class hardcodes vector_dimension=1024 in
---    initialize_table(); the demo subclass (CassandraWithDims) passes
---    embedder.dimensions (384) instead.
+--    NOTE: cassio receives vector_dimension as a constructor argument.
+--    agno's Cassandra class hardcodes 1024; the demo subclass (CassandraWithDims)
+--    passes embedder.dimensions (384 for all-MiniLM-L6-v2) instead.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS agno_keyspace.knowledge_st (
-    row_id        text,
+    row_id          text,
     attributes_blob text,
-    body_blob     text,
-    document_name text,
-    metadata_s    map<text, text>,
-    vector        vector<float, 384>,
+    body_blob       text,
+    document_name   text,
+    metadata_s      map<text, text>,
+    vector          vector<float, 384>,
     PRIMARY KEY (row_id)
 );
 
 
 -- ---------------------------------------------------------------------------
 -- 3. Indexes
---    Also created automatically by cassio on table initialisation.
+--    cassio runs these DDL statements during table initialisation.
+--    ScyllaDB silently rewrites the metadata index (see below).
 -- ---------------------------------------------------------------------------
 
--- ANN (Approximate Nearest Neighbour) index on the vector column.
--- Powers ORDER BY vector ANN OF <query_vector> queries.
--- ScyllaDB routes these to the vector-store service (port 6080).
+-- 3a. ANN vector index
+--     cassio sends:
 CREATE CUSTOM INDEX IF NOT EXISTS idx_vector_knowledge_st
     ON agno_keyspace.knowledge_st (vector)
-    USING 'vector_index';
+    USING 'org.apache.cassandra.index.sai.StorageAttachedIndex';
+--
+-- ScyllaDB stores it as:
+--   CREATE CUSTOM INDEX idx_vector_knowledge_st
+--       ON agno_keyspace.knowledge_st (vector)
+--       USING 'vector_index';
+--
+-- ScyllaDB translates the generic SAI declaration into its own vector_index
+-- type and delegates ANN queries to the vector-store sidecar (port 6080).
 
--- Secondary index on the ENTRIES of the metadata_s map.
--- Allows filtering by individual metadata key/value pairs.
--- Requires --enable-cassio-compatibility 1 on ScyllaDB (otherwise cassio
--- tries to use SAI on map entries, which ScyllaDB does not support).
-CREATE INDEX IF NOT EXISTS eidx_metadata_s_knowledge_st
-    ON agno_keyspace.knowledge_st (entries(metadata_s));
+
+-- 3b. Metadata map ENTRIES index
+--     cassio sends:
+CREATE CUSTOM INDEX IF NOT EXISTS eidx_metadata_s_knowledge_st
+    ON agno_keyspace.knowledge_st (ENTRIES(metadata_s))
+    USING 'org.apache.cassandra.index.sai.StorageAttachedIndex';
+--
+-- ScyllaDB stores it as:
+--   CREATE INDEX eidx_metadata_s_knowledge_st
+--       ON agno_keyspace.knowledge_st (entries(metadata_s));
+--
+-- ScyllaDB does not support SAI on map ENTRIES. With the flag
+-- --enable-cassio-compatibility 1 it rewrites the statement as a regular
+-- secondary index instead of rejecting it.
+-- This index powers the WHERE metadata_s['key'] = ? filter used by
+-- delete_by_metadata() and filtered ANN searches.
 
 
 -- =============================================================================
